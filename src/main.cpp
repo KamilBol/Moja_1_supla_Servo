@@ -2,25 +2,25 @@
 #include <SuplaDevice.h>
 #include <supla/network/esp_wifi.h>
 #include <supla/control/relay.h>
+#include <supla/control/button.h>
 #include <supla/device/status_led.h>
+#include <supla/storage/littlefs_config.h>
+#include <supla/network/html/device_info.h>
+#include <supla/network/html/protocol_parameters.h>
+#include <supla/network/html/wifi_parameters.h>
+#include <supla/network/html/status_led_parameters.h>
 #include <Servo.h>
 
-// ================= KONFIGURACJA =================
-const char* WIFI_SSID = "TUTAJ_WPISZ_NAZWE_WIFI";
-const char* WIFI_PASS = "TUTAJ_WPISZ_HASLO_WIFI";
-const char* SUPLA_SERVER = "svrX.supla.org"; // Twój adres serwera (np. svr1.supla.org)
-const char* SUPLA_EMAIL = "twoj@email.com";  // Twój email do Supli
+// --- KONFIGURACJA PINÓW (Wemos D1 Mini) ---
+const int SERVO_PIN = D1;        // Serwo
+const int STATUS_LED_PIN = D4;   // Dioda LED (Wemos ma na D4)
+const int CONFIG_BUTTON_PIN = D3; // Przycisk FLASH (D3) - do wchodzenia w tryb konfiguracyjny
 
-// PINY (Dla Wemos D1 Mini)
-const int SERVO_PIN = D1;      // Tu podłączasz sygnał serwa
-const int STATUS_LED_PIN = D4; // Wbudowana dioda LED
-
-// KĄTY SERWA
+// --- USTAWIENIA SERWA ---
 const int KAT_OTWARTY = 90;
 const int KAT_ZAMKNIETY = 0;
 
-// ================= KLASA WŁASNA (MAGICZNA) =================
-// To sprawia, że serwo udaje przekaźnik w Supli
+// --- TWOJA KLASA SERWA (Działa jak przekaźnik) ---
 class ServoRelay : public Supla::Control::Relay {
   private:
     Servo myServo;
@@ -28,43 +28,55 @@ class ServoRelay : public Supla::Control::Relay {
 
   public:
     ServoRelay(int pinGpio) : Relay(pinGpio, false), pin(pinGpio) {
-      // Konstruktor: ustawiamy serwo na start
       myServo.attach(pin);
       myServo.write(KAT_ZAMKNIETY);
     }
 
-    // Nadpisujemy włączenie (zamiast prądu, ruszamy serwem)
     void turnOn(_supla_int_t duration) override {
-      Serial.println("SUPLA: Włączono -> Otwieram Serwo");
-      myServo.attach(pin); 
+      Serial.println("SUPLA: Otwieram zawór");
+      myServo.attach(pin);
       myServo.write(KAT_OTWARTY);
-      channel.setNewStatus(true); // Zmieniamy ikonę w apce na ON
+      channel.setNewStatus(true);
     }
 
-    // Nadpisujemy wyłączenie
     void turnOff(_supla_int_t duration) override {
-      Serial.println("SUPLA: Wyłączono -> Zamykam Serwo");
+      Serial.println("SUPLA: Zamykam zawór");
       myServo.write(KAT_ZAMKNIETY);
-      channel.setNewStatus(false); // Zmieniamy ikonę w apce na OFF
+      channel.setNewStatus(false);
     }
 };
 
-// Obiekt WiFi
-Supla::ESPWifi wifi(WIFI_SSID, WIFI_PASS);
+// --- KOMPONENTY SYSTEMU ---
+Supla::Storage::LittleFsConfig config;
+Supla::ESPWifi wifi;
+Supla::Html::DeviceInfo deviceInfo(&SuplaDevice);
+Supla::Html::WifiParameters wifiParams;
+
+// TO JEST KLUCZOWE - To dodaje pola "Serwer" i "Email" na stronie konfiguracyjnej!
+Supla::Html::ProtocolParameters protocolParams; 
+
+Supla::Html::StatusLedParameters statusLedParams;
 
 void setup() {
   Serial.begin(115200);
-  
-  // Konfiguracja Supla
-  // GUID i AUTH KEY biblioteka wygeneruje sama przy pierwszym uruchomieniu
-  // (pod warunkiem włączonej rejestracji urządzeń w Cloudzie)
-  SuplaDevice.begin(0, SUPLA_SERVER, SUPLA_EMAIL, nullptr);
 
-  // Dioda statusu (miga jak szuka sieci)
+  // 1. Ustawienie niestandardowego IP strony konfiguracyjnej (Twoje 192.168.5.1)
+  wifi.setAPAddress(IPAddress(192.168, 5, 1));
+
+  // 2. Dioda statusu
   new Supla::Device::StatusLed(STATUS_LED_PIN, true);
 
-  // Dodajemy nasze Serwo do systemu
+  // 3. Przycisk Konfiguracji (D3/Flash)
+  // Jak przytrzymasz go 5-10s, urządzenie wejdzie w tryb konfiguracji i wystawi sieć WiFi.
+  // To jest Twoje "zabezpieczenie" - nikt nie wejdzie w ustawienia bez fizycznego dostępu.
+  auto cfgButton = new Supla::Control::Button(CONFIG_BUTTON_PIN, true, true);
+  cfgButton->configureAsConfigButton(&SuplaDevice);
+
+  // 4. Twoje Serwo
   new ServoRelay(SERVO_PIN);
+
+  // 5. Start biblioteki
+  SuplaDevice.begin();
 }
 
 void loop() {
