@@ -11,16 +11,16 @@
 #include <supla/network/html/status_led_parameters.h>
 #include <Servo.h>
 
-// --- KONFIGURACJA PINÓW (Wemos D1 Mini) ---
-const int SERVO_PIN = D1;        // Serwo
-const int STATUS_LED_PIN = D4;   // Dioda LED (Wemos ma na D4)
-const int CONFIG_BUTTON_PIN = D3; // Przycisk FLASH (D3) - do wchodzenia w tryb konfiguracyjny
+// --- KONFIGURACJA PINÓW ---
+const int SERVO_PIN = D1;
+const int STATUS_LED_PIN = D4;
+const int CONFIG_BUTTON_PIN = D3;
 
 // --- USTAWIENIA SERWA ---
 const int KAT_OTWARTY = 90;
 const int KAT_ZAMKNIETY = 0;
 
-// --- TWOJA KLASA SERWA (Działa jak przekaźnik) ---
+// --- TWOJA KLASA SERWA ---
 class ServoRelay : public Supla::Control::Relay {
   private:
     Servo myServo;
@@ -36,41 +36,38 @@ class ServoRelay : public Supla::Control::Relay {
       Serial.println("SUPLA: Otwieram zawór");
       myServo.attach(pin);
       myServo.write(KAT_OTWARTY);
-      channel.setNewStatus(true);
+      channel.setNewValue(true);
     }
 
     void turnOff(_supla_int_t duration) override {
       Serial.println("SUPLA: Zamykam zawór");
       myServo.write(KAT_ZAMKNIETY);
-      channel.setNewStatus(false);
+      channel.setNewValue(false);
     }
 };
 
-// --- KOMPONENTY SYSTEMU ---
-Supla::Storage::LittleFsConfig config;
+// Komponenty globalne
 Supla::ESPWifi wifi;
 Supla::Html::DeviceInfo deviceInfo(&SuplaDevice);
 Supla::Html::WifiParameters wifiParams;
-
-// TO JEST KLUCZOWE - To dodaje pola "Serwer" i "Email" na stronie konfiguracyjnej!
-Supla::Html::ProtocolParameters protocolParams; 
-
+Supla::Html::ProtocolParameters protocolParams;
 Supla::Html::StatusLedParameters statusLedParams;
 
 void setup() {
   Serial.begin(115200);
 
-  // 1. Ustawienie niestandardowego IP strony konfiguracyjnej (Twoje 192.168.5.1)
-  wifi.setAPAddress(IPAddress(192.168, 5, 1));
+  // 1. Konfiguracja pamięci (LittleFS)
+  // POPRAWKA: Używamy Supla::LittleFsConfig bez "Storage::"
+  new Supla::LittleFsConfig();
 
   // 2. Dioda statusu
   new Supla::Device::StatusLed(STATUS_LED_PIN, true);
 
-  // 3. Przycisk Konfiguracji (D3/Flash)
-  // Jak przytrzymasz go 5-10s, urządzenie wejdzie w tryb konfiguracji i wystawi sieć WiFi.
-  // To jest Twoje "zabezpieczenie" - nikt nie wejdzie w ustawienia bez fizycznego dostępu.
+  // 3. Przycisk Konfiguracji
   auto cfgButton = new Supla::Control::Button(CONFIG_BUTTON_PIN, true, true);
-  cfgButton->configureAsConfigButton(&SuplaDevice);
+  
+  // POPRAWKA: Dodaliśmy znak "&" przed SuplaDevice (przekazujemy wskaźnik)
+  cfgButton->addAction(Supla::ENTER_CONFIG_MODE, &SuplaDevice, Supla::ON_HOLD);
 
   // 4. Twoje Serwo
   new ServoRelay(SERVO_PIN);
